@@ -13,7 +13,7 @@
     </parent>
 
     <groupId>com.example</groupId>
-    <artifactId>redis-streams-example</artifactId>
+    <artifactId>queue</artifactId>
     <version>1.0.0</version>
     <packaging>jar</packaging>
 
