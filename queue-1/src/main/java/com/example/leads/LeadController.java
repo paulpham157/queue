@@ -8,6 +8,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.params.XAddParams;
@@ -32,10 +34,16 @@ public class LeadController {
 
     private final AppProperties props;
     private final JedisPool pool;
+    private final Counter idemReleaseFailures;
 
-    public LeadController(AppProperties props, JedisPool pool) {
+    public LeadController(AppProperties props, JedisPool pool, MeterRegistry meterRegistry) {
         this.props = props;
         this.pool = pool;
+        // Counter for "DEL after failed XADD also failed". Any non-zero rate means clients
+        // will get spurious 409s for ~24h. Page on this; do not ignore.
+        this.idemReleaseFailures = Counter.builder("idempotency.release.failures")
+            .description("Idempotency key releases that failed after a failed XADD; client retries will 409 until TTL")
+            .register(meterRegistry);
     }
 
     @PostMapping("/leads")
@@ -71,9 +79,19 @@ public class LeadController {
             entry.put("message", nullToEmpty(req.getMessage()));
             entry.put("source", req.getSource() == null || req.getSource().isBlank() ? "landing" : req.getSource());
 
-            // Approximate MAXLEN — Redis trims in chunks (uses `~`), cheaper than exact trim.
-            XAddParams params = XAddParams.xAddParams().maxLen(STREAM_MAX_LEN).approximateTrimming();
-            jedis.xadd(props.getStream().getName(), entry, params);
+            try {
+                // Approximate MAXLEN (~) — Redis trims in chunks, cheaper than exact trim.
+                // Stream may slightly exceed STREAM_MAX_LEN; do not rely on exact bound.
+                XAddParams params = XAddParams.xAddParams().maxLen(STREAM_MAX_LEN).approximateTrimming();
+                jedis.xadd(props.getStream().getName(), entry, params);
+            } catch (Exception e) {
+                // XADD failed AFTER the idem lock was taken. Without this DEL the key
+                // would block retries for 24h even though no lead was ever queued.
+                releaseIdemKey(jedis, idemKey);
+                log.error("Failed to enqueue lead: email={}", req.getEmail(), e);
+                return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Map.of("error", "queue_unavailable"));
+            }
 
             log.info("Lead queued: id={} email={}", leadId, req.getEmail());
             return ResponseEntity.ok(Map.of("id", leadId, "status", "queued"));
@@ -82,6 +100,19 @@ public class LeadController {
             log.error("Failed to enqueue lead: email={}", req.getEmail(), e);
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(Map.of("error", "queue_unavailable"));
+        }
+    }
+
+    private void releaseIdemKey(Jedis jedis, String idemKey) {
+        if (idemKey == null) return;
+        try {
+            jedis.del(idemKey);
+        } catch (Exception delEx) {
+            // If DEL fails too (Redis dead), the lock survives until TTL expires.
+            // Bump the counter so ops gets paged; the log line is for forensics.
+            idemReleaseFailures.increment();
+            log.error("CRITICAL: failed to release idempotency key {} — retries will 409 for {}h",
+                idemKey, IDEMPOTENCY_TTL.toHours(), delEx);
         }
     }
 
