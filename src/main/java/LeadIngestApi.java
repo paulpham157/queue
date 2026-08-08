@@ -14,18 +14,24 @@ import java.util.Map;
 import java.util.UUID;
 
 public class LeadIngestApi {
-    private final Jedis jedis = new Jedis("localhost", 6379);
-    private static final String STREAM = "leads";
+    private final Config cfg;
+    private final Jedis jedis;
+
+    public LeadIngestApi(Config cfg) {
+        this.cfg = cfg;
+        this.jedis = new Jedis(cfg.redisHost, cfg.redisPort);
+    }
 
     public static void main(String[] args) throws Exception {
-        LeadIngestApi api = new LeadIngestApi();
-        HttpServer server = HttpServer.create(new InetSocketAddress(8080), 0);
+        Config cfg = Config.load();
+        LeadIngestApi api = new LeadIngestApi(cfg);
+        HttpServer server = HttpServer.create(new InetSocketAddress(cfg.apiPort), 0);
         server.createContext("/leads", api.new LeadsHandler());
         server.createContext("/", api.new StaticHandler());
         server.setExecutor(null);
         server.start();
-        System.out.println("LeadIngestApi listening on http://localhost:8080");
-        System.out.println("Open http://localhost:8080/ for landing page");
+        System.out.println("LeadIngestApi listening on http://localhost:" + cfg.apiPort);
+        System.out.println("Open http://localhost:" + cfg.apiPort + "/ for landing page");
     }
 
     class LeadsHandler implements HttpHandler {
@@ -64,7 +70,7 @@ public class LeadIngestApi {
                 entry.put("message", lead.message);
                 entry.put("source", lead.source);
 
-                jedis.xadd(STREAM, entry, XAddParams.xAddParams());
+                jedis.xadd(cfg.streamName, entry, XAddParams.xAddParams());
 
                 String resp = "{\"id\":\"" + lead.id + "\",\"status\":\"queued\"}";
                 sendJson(ex, 202, resp);

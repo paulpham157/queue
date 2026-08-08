@@ -17,13 +17,18 @@ import java.util.Map;
 import java.util.Properties;
 
 public class EmailWorker {
-    private final Jedis jedis = new Jedis("localhost", 6379);
-    private static final String STREAM = "leads";
+    private final Config cfg;
+    private final Jedis jedis;
     private static final String GROUP = "email_svc";
     private static final String CONSUMER = "email-worker-1";
 
+    public EmailWorker(Config cfg) {
+        this.cfg = cfg;
+        this.jedis = new Jedis(cfg.redisHost, cfg.redisPort);
+    }
+
     public static void main(String[] args) {
-        new EmailWorker().run();
+        new EmailWorker(Config.load()).run();
     }
 
     public void run() {
@@ -32,7 +37,7 @@ public class EmailWorker {
             .block(5000)
             .count(10);
 
-        Map<String, StreamEntryID> streams = Map.of(STREAM, new StreamEntryID(">"));
+        Map<String, StreamEntryID> streams = Map.of(cfg.streamName, new StreamEntryID(">"));
 
         System.out.println("EmailWorker started. Waiting for leads...");
         while (true) {
@@ -45,12 +50,12 @@ public class EmailWorker {
                 for (StreamEntry entry : streamEntry.getValue()) {
                     Map<String, String> data = entry.getFields();
                     if (!"lead.created".equals(data.get("event"))) {
-                        jedis.xack(STREAM, GROUP, entry.getID());
+                        jedis.xack(cfg.streamName, GROUP, entry.getID());
                         continue;
                     }
                     try {
                         sendWelcomeEmail(data.get("name"), data.get("email"));
-                        jedis.xack(STREAM, GROUP, entry.getID());
+                        jedis.xack(cfg.streamName, GROUP, entry.getID());
                         System.out.println("Email sent to " + data.get("email"));
                     } catch (Exception e) {
                         System.err.println("Failed to send email for " + data.get("id") + ": " + e.getMessage());
@@ -62,7 +67,7 @@ public class EmailWorker {
 
     private void ensureGroup() {
         try {
-            jedis.xgroupCreate(STREAM, GROUP, new StreamEntryID("0-0"), true);
+            jedis.xgroupCreate(cfg.streamName, GROUP, new StreamEntryID("0-0"), true);
         } catch (JedisDataException e) {
             // group exists
         }
@@ -70,8 +75,8 @@ public class EmailWorker {
 
     private void sendWelcomeEmail(String name, String email) throws Exception {
         Properties p = new Properties();
-        p.put("mail.smtp.host", "localhost");
-        p.put("mail.smtp.port", "1025");
+        p.put("mail.smtp.host", cfg.smtpHost);
+        p.put("mail.smtp.port", String.valueOf(cfg.smtpPort));
         p.put("mail.smtp.auth", "false");
         p.put("mail.smtp.starttls.enable", "false");
 
@@ -82,7 +87,7 @@ public class EmailWorker {
         });
 
         MimeMessage msg = new MimeMessage(session);
-        msg.setFrom(new InternetAddress("hello@acme.com"));
+        msg.setFrom(new InternetAddress(cfg.smtpFrom));
         msg.setRecipients(Message.RecipientType.TO, InternetAddress.parse(email));
         msg.setSubject("Welcome to Acme!");
         msg.setText("Hi " + name + ",\n\nThanks for signing up. We'll be in touch shortly.\n\n— Acme");

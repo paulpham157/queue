@@ -13,17 +13,21 @@ import java.util.List;
 import java.util.Map;
 
 public class CrmWorker {
-    private final Jedis jedis = new Jedis("localhost", 6379);
+    private final Config cfg;
+    private final Jedis jedis;
     private final HttpClient http = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(5)).build();
 
-    private static final String STREAM = "leads";
     private static final String GROUP = "crm_svc";
     private static final String CONSUMER = "crm-worker-1";
-    private static final String CRM_URL = "http://localhost:3000/leads";
+
+    public CrmWorker(Config cfg) {
+        this.cfg = cfg;
+        this.jedis = new Jedis(cfg.redisHost, cfg.redisPort);
+    }
 
     public static void main(String[] args) {
-        new CrmWorker().run();
+        new CrmWorker(Config.load()).run();
     }
 
     public void run() {
@@ -32,7 +36,7 @@ public class CrmWorker {
             .block(5000)
             .count(10);
 
-        Map<String, StreamEntryID> streams = Map.of(STREAM, new StreamEntryID(">"));
+        Map<String, StreamEntryID> streams = Map.of(cfg.streamName, new StreamEntryID(">"));
 
         System.out.println("CrmWorker started. Waiting for leads...");
         while (true) {
@@ -45,12 +49,12 @@ public class CrmWorker {
                 for (StreamEntry entry : streamEntry.getValue()) {
                     Map<String, String> data = entry.getFields();
                     if (!"lead.created".equals(data.get("event"))) {
-                        jedis.xack(STREAM, GROUP, entry.getID());
+                        jedis.xack(cfg.streamName, GROUP, entry.getID());
                         continue;
                     }
                     try {
                         addLeadToCrm(data);
-                        jedis.xack(STREAM, GROUP, entry.getID());
+                        jedis.xack(cfg.streamName, GROUP, entry.getID());
                         System.out.println("Lead added to CRM: " + data.get("id"));
                     } catch (Exception e) {
                         System.err.println("CRM push failed for " + data.get("id") + ": " + e.getMessage());
@@ -62,7 +66,7 @@ public class CrmWorker {
 
     private void ensureGroup() {
         try {
-            jedis.xgroupCreate(STREAM, GROUP, new StreamEntryID("0-0"), true);
+            jedis.xgroupCreate(cfg.streamName, GROUP, new StreamEntryID("0-0"), true);
         } catch (JedisDataException e) {
             // group exists
         }
@@ -77,7 +81,7 @@ public class CrmWorker {
             + "\"source\":\"" + esc(data.get("source")) + "\""
             + "}";
 
-        HttpRequest req = HttpRequest.newBuilder(URI.create(CRM_URL))
+        HttpRequest req = HttpRequest.newBuilder(URI.create(cfg.crmUrl))
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(body))
             .build();

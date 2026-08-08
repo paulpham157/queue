@@ -12,18 +12,19 @@ import java.util.Map;
 import java.util.UUID;
 
 public class AnalyticsWorker {
-    private final Jedis jedis = new Jedis("localhost", 6379);
+    private final Config cfg;
+    private final Jedis jedis;
 
-    private static final String STREAM = "leads";
     private static final String GROUP = "analytics_svc";
     private static final String CONSUMER = "analytics-worker-1";
-    private static final String DB_URL =
-        "jdbc:postgresql://localhost:5432/analytics";
-    private static final String DB_USER = "analytics";
-    private static final String DB_PASS = "analytics";
+
+    public AnalyticsWorker(Config cfg) {
+        this.cfg = cfg;
+        this.jedis = new Jedis(cfg.redisHost, cfg.redisPort);
+    }
 
     public static void main(String[] args) {
-        new AnalyticsWorker().run();
+        new AnalyticsWorker(Config.load()).run();
     }
 
     public void run() {
@@ -32,7 +33,7 @@ public class AnalyticsWorker {
             .block(5000)
             .count(10);
 
-        Map<String, StreamEntryID> streams = Map.of(STREAM, new StreamEntryID(">"));
+        Map<String, StreamEntryID> streams = Map.of(cfg.streamName, new StreamEntryID(">"));
 
         System.out.println("AnalyticsWorker started. Waiting for leads...");
         while (true) {
@@ -45,12 +46,12 @@ public class AnalyticsWorker {
                 for (StreamEntry entry : streamEntry.getValue()) {
                     Map<String, String> data = entry.getFields();
                     if (!"lead.created".equals(data.get("event"))) {
-                        jedis.xack(STREAM, GROUP, entry.getID());
+                        jedis.xack(cfg.streamName, GROUP, entry.getID());
                         continue;
                     }
                     try {
                         insertLead(data);
-                        jedis.xack(STREAM, GROUP, entry.getID());
+                        jedis.xack(cfg.streamName, GROUP, entry.getID());
                         System.out.println("Lead inserted to warehouse: " + data.get("id"));
                     } catch (Exception e) {
                         System.err.println("DB insert failed for " + data.get("id") + ": " + e.getMessage());
@@ -62,7 +63,7 @@ public class AnalyticsWorker {
 
     private void ensureGroup() {
         try {
-            jedis.xgroupCreate(STREAM, GROUP, new StreamEntryID("0-0"), true);
+            jedis.xgroupCreate(cfg.streamName, GROUP, new StreamEntryID("0-0"), true);
         } catch (JedisDataException e) {
             // group exists
         }
@@ -73,7 +74,7 @@ public class AnalyticsWorker {
                    + "VALUES (?, ?, ?, ?, ?, ?, NOW()) "
                    + "ON CONFLICT (id) DO NOTHING";
 
-        try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASS);
+        try (Connection conn = DriverManager.getConnection(cfg.dbUrl, cfg.dbUser, cfg.dbPass);
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setObject(1, data.getOrDefault("id", UUID.randomUUID().toString()));
             ps.setString(2, data.getOrDefault("name", ""));
