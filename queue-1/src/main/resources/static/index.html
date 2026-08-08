@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Acme Leads</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 16px; }
+  h1 { font-size: 20px; margin-bottom: 24px; }
+  label { display: block; font-size: 13px; margin: 12px 0 4px; color: #555; }
+  input, textarea { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font: inherit; }
+  textarea { min-height: 60px; resize: vertical; }
+  button { margin-top: 16px; padding: 10px 20px; background: #2563eb; color: #fff; border: 0; border-radius: 4px; cursor: pointer; font: inherit; }
+  button:disabled { background: #94a3b8; cursor: not-allowed; }
+  #result { margin-top: 16px; padding: 12px; border-radius: 4px; font-size: 13px; display: none; }
+  #result.ok { background: #dcfce7; color: #166534; display: block; }
+  #result.err { background: #fee2e2; color: #991b1b; display: block; }
+</style>
+</head>
+<body>
+<h1>Submit a lead</h1>
+<form id="lead-form">
+  <label>Name *<input name="name" required></label>
+  <label>Email *<input name="email" type="email" required></label>
+  <label>Company<input name="company"></label>
+  <label>Source<input name="source" value="landing"></label>
+  <label>Message<textarea name="message"></textarea></label>
+  <button type="submit">Submit</button>
+</form>
+<div id="result"></div>
+
+<script>
+const form = document.getElementById('lead-form');
+const result = document.getElementById('result');
+const btn = form.querySelector('button');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  btn.disabled = true;
+  result.className = '';
+  result.textContent = '';
+
+  const data = Object.fromEntries(new FormData(form).entries());
+  const idemKey = (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random()).slice(0, 36);
+
+  try {
+    const resp = await fetch('/leads', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idemKey,
+      },
+      body: JSON.stringify(data),
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      result.className = 'ok';
+      result.textContent = `Queued: ${body.id}`;
+      form.reset();
+    } else {
+      result.className = 'err';
+      result.textContent = `Error ${resp.status}: ${body.error || resp.statusText}`;
+    }
+  } catch (err) {
+    result.className = 'err';
+    result.textContent = `Network error: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

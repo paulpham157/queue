@@ -28,6 +28,7 @@ public class CrmWorker {
     private final AppProperties props;
     private final JedisPool pool;
     private final HttpClient http = HttpClient.newBuilder()
+        .version(HttpClient.Version.HTTP_1_1)
         .connectTimeout(Duration.ofSeconds(5)).build();
     private final AtomicBoolean running = new AtomicBoolean(true);
     private static final String GROUP = "crm_svc";
@@ -51,7 +52,7 @@ public class CrmWorker {
         try (Jedis jedis = pool.getResource()) {
             ensureGroup(jedis);
             XReadGroupParams params = XReadGroupParams.xReadGroupParams().block(5000).count(10);
-            Map<String, StreamEntryID> streams = Map.of(props.getStream().getName(), new StreamEntryID(">"));
+            Map<String, StreamEntryID> streams = Map.of(props.getStream().getName(), StreamEntryID.UNRECEIVED_ENTRY);
 
             log.info("CrmWorker started. Waiting for leads...");
             while (running.get()) {

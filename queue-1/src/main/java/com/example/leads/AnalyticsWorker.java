@@ -48,7 +48,7 @@ public class AnalyticsWorker {
         try (Jedis jedis = pool.getResource()) {
             ensureGroup(jedis);
             XReadGroupParams params = XReadGroupParams.xReadGroupParams().block(5000).count(10);
-            Map<String, StreamEntryID> streams = Map.of(props.getStream().getName(), new StreamEntryID(">"));
+            Map<String, StreamEntryID> streams = Map.of(props.getStream().getName(), StreamEntryID.UNRECEIVED_ENTRY);
 
             log.info("AnalyticsWorker started. Waiting for leads...");
             while (running.get()) {
