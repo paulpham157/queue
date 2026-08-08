@@ -8,6 +8,6 @@ RUN mvn -B package -DskipTests
 
 FROM eclipse-temurin:11-jre
 WORKDIR /app
-COPY --from=build /app/target/queue-1.0.0.jar app.jar
+COPY --from=build /app/target/queue-1-1.0.0.jar app.jar
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]
