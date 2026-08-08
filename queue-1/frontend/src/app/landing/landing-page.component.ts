@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { ChatbotDemoComponent } from './chatbot-demo.component';
 import { DataAnalystDemoComponent } from './data-analyst-demo.component';
 import { LeadFormComponent } from './lead-form.component';
-import { SERVICES, TESTIMONIALS } from '../prototype/shared';
+import { SERVICES, TESTIMONIALS } from './shared';
 
 type TabKey = 'workflow' | 'data';
 

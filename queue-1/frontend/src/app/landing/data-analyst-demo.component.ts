@@ -1,7 +1,7 @@
 import { Component, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { INSIGHTS } from '../prototype/shared';
+import { INSIGHTS } from './shared';
 
 interface Insight {
   question: string;

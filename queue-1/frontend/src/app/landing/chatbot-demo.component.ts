@@ -1,7 +1,7 @@
 import { Component, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { BOT_REPLIES, BOT_DEFAULT } from '../prototype/shared';
+import { BOT_REPLIES, BOT_DEFAULT } from './shared';
 
 interface ChatMsg {
   role: 'user' | 'bot';

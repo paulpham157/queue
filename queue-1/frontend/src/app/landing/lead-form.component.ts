@@ -1,7 +1,7 @@
 import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { SERVICES } from '../prototype/shared';
+import { SERVICES } from './shared';
 
 interface Lead {
   name: string;
