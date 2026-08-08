@@ -24,8 +24,19 @@ block the others.
 ```bash
 cp .env.example .env
 docker compose up --build
-# open http://localhost:8080
+# Backend API only — POST http://localhost:8080/leads
 ```
+
+The UI lives in `/frontend` (Angular). Run it separately:
+
+```bash
+docker compose up -d redis mailhog mock-crm postgres
+cd frontend && npm install && npx ng serve
+# Angular UI: http://localhost:4200
+```
+
+The Angular dev server proxies `/leads` to `http://localhost:8080`, so the
+form talks to the backend without CORS configuration.
 
 Submit the form, then verify:
 - App logs: `docker compose logs -f app`
@@ -54,8 +65,11 @@ src/main/java/com/example/leads/
 ├── CrmWorker.java           @Component, group crm_svc, HTTP
 └── AnalyticsWorker.java     @Component, group analytics_svc, JDBC
 src/main/resources/
-├── application.yml          config with ${ENV:default} overrides
-└── landing.html             form served at /
+└── application.yml          config with ${ENV:default} overrides
+frontend/                    Angular 18 + Tailwind UI (separate dev process)
+├── src/app/                 standalone AppComponent with form + landing
+├── src/proxy.conf.json      proxies /leads → http://localhost:8080
+└── tailwind.config.js
 ```
 
 ## Configuration

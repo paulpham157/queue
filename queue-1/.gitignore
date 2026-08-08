@@ -1,0 +1,24 @@
+# IDE
+.project
+.idea/
+*.iml
+.vscode/
+
+# Build artifacts
+target/
+build/
+*.class
+*.jar
+*.war
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
