@@ -9,8 +9,11 @@ import jakarta.mail.Session;
 import jakarta.mail.Transport;
 import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.StreamEntryID;
 import redis.clients.jedis.exceptions.JedisDataException;
 import redis.clients.jedis.params.XReadGroupParams;
@@ -23,14 +26,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 @Component
 public class EmailWorker {
+    private static final Logger log = LoggerFactory.getLogger(EmailWorker.class);
+
     private final AppProperties props;
-    private final Jedis jedis;
+    private final JedisPool pool;
     private final AtomicBoolean running = new AtomicBoolean(true);
     private static final String GROUP = "email_svc";
 
-    public EmailWorker(AppProperties props) {
+    public EmailWorker(AppProperties props, JedisPool pool) {
         this.props = props;
-        this.jedis = new Jedis(props.getRedis().getHost(), props.getRedis().getPort());
+        this.pool = pool;
     }
 
     @PostConstruct
@@ -44,36 +49,46 @@ public class EmailWorker {
     public void stop() { running.set(false); }
 
     public void run() {
-        ensureGroup();
-        XReadGroupParams params = XReadGroupParams.xReadGroupParams().block(5000).count(10);
-        Map<String, StreamEntryID> streams = Map.of(props.getStream().getName(), new StreamEntryID(">"));
+        try (Jedis jedis = pool.getResource()) {
+            ensureGroup(jedis);
+            XReadGroupParams params = XReadGroupParams.xReadGroupParams().block(5000).count(10);
+            Map<String, StreamEntryID> streams = Map.of(props.getStream().getName(), new StreamEntryID(">"));
 
-        System.out.println("EmailWorker started. Waiting for leads...");
-        while (running.get()) {
-            List<Map.Entry<String, List<StreamEntry>>> result =
-                jedis.xreadGroup(GROUP, "email-worker-1", params, streams);
-            if (result == null) continue;
-            for (var streamEntry : result) {
-                for (StreamEntry entry : streamEntry.getValue()) {
-                    Map<String, String> data = entry.getFields();
-                    if (!"lead.created".equals(data.get("event"))) {
-                        jedis.xack(props.getStream().getName(), GROUP, entry.getID());
-                        continue;
-                    }
-                    try {
-                        sendWelcomeEmail(data.get("name"), data.get("email"));
-                        jedis.xack(props.getStream().getName(), GROUP, entry.getID());
-                        System.out.println("Email sent to " + data.get("email"));
-                    } catch (Exception e) {
-                        System.err.println("Failed to send email for " + data.get("id") + ": " + e.getMessage());
+            log.info("EmailWorker started. Waiting for leads...");
+            while (running.get()) {
+                List<Map.Entry<String, List<StreamEntry>>> result;
+                try {
+                    result = jedis.xreadGroup(GROUP, "email-worker-1", params, streams);
+                } catch (Exception e) {
+                    log.error("EmailWorker xreadGroup failed; backing off", e);
+                    sleepQuiet(1000);
+                    continue;
+                }
+                if (result == null) continue;
+                for (var streamEntry : result) {
+                    for (StreamEntry entry : streamEntry.getValue()) {
+                        Map<String, String> data = entry.getFields();
+                        if (!"lead.created".equals(data.get("event"))) {
+                            jedis.xack(props.getStream().getName(), GROUP, entry.getID());
+                            continue;
+                        }
+                        try {
+                            sendWelcomeEmail(data.get("name"), data.get("email"));
+                            jedis.xack(props.getStream().getName(), GROUP, entry.getID());
+                            log.info("Email sent to {}", data.get("email"));
+                        } catch (Exception e) {
+                            log.error("Failed to send email for {}", data.get("id"), e);
+                        }
                     }
                 }
             }
+            log.info("EmailWorker stopped.");
+        } catch (Exception e) {
+            log.error("EmailWorker fatal — pool resource could not be acquired", e);
         }
-        System.out.println("EmailWorker stopped.");
     }
 
-    private void ensureGroup() {
+    private void ensureGroup(Jedis jedis) {
         try {
             jedis.xgroupCreate(props.getStream().getName(), GROUP, new StreamEntryID("0-0"), true);
         } catch (JedisDataException e) {
@@ -100,5 +115,9 @@ public class EmailWorker {
         msg.setSubject("Welcome to Acme!");
         msg.setText("Hi " + name + ",\n\nThanks for signing up. We'll be in touch shortly.\n\n— Acme");
         Transport.send(msg);
+    }
+
+    private static void sleepQuiet(long ms) {
+        try { Thread.sleep(ms); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
     }
 }

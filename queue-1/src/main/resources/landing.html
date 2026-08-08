@@ -29,15 +29,28 @@
 <script>
 document.getElementById('f').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const data = new URLSearchParams(new FormData(e.target));
+  const form = e.target;
+  const payload = {
+    name: form.name.value,
+    email: form.email.value,
+    company: form.company.value,
+    source: form.source.value,
+    message: form.message.value,
+  };
+  // Per-submit UUID so retries from this browser are deduped server-side.
+  const idemKey = crypto.randomUUID();
   const status = document.getElementById('status');
   status.className = '';
   status.textContent = 'Submitting...';
   status.style.display = 'block';
   try {
-    const r = await fetch('/leads', { method: 'POST', body: data });
+    const r = await fetch('/leads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idemKey },
+      body: JSON.stringify(payload),
+    });
     const j = await r.json();
-    if (r.ok) { status.className = 'ok'; status.textContent = 'Thanks! Lead ' + j.id + ' queued.'; e.target.reset(); }
+    if (r.ok) { status.className = 'ok'; status.textContent = 'Thanks! Lead ' + j.id + ' queued.'; form.reset(); }
     else { status.className = 'err'; status.textContent = 'Error: ' + (j.error || 'unknown'); }
   } catch (err) {
     status.className = 'err'; status.textContent = 'Network error: ' + err.message;

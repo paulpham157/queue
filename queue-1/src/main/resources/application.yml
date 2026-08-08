@@ -5,6 +5,11 @@ app:
   redis:
     host: ${REDIS_HOST:redis}
     port: ${REDIS_PORT:6379}
+    pool:
+      max-total: ${REDIS_POOL_MAX_TOTAL:16}
+      max-idle: ${REDIS_POOL_MAX_IDLE:8}
+      min-idle: ${REDIS_POOL_MIN_IDLE:2}
+      timeout-ms: ${REDIS_POOL_TIMEOUT_MS:2000}
   stream:
     name: ${STREAM_NAME:leads}
   smtp:

@@ -2,8 +2,11 @@ package com.example.leads;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.StreamEntryID;
 import redis.clients.jedis.exceptions.JedisDataException;
 import redis.clients.jedis.params.XReadGroupParams;
@@ -20,16 +23,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 @Component
 public class CrmWorker {
+    private static final Logger log = LoggerFactory.getLogger(CrmWorker.class);
+
     private final AppProperties props;
-    private final Jedis jedis;
+    private final JedisPool pool;
     private final HttpClient http = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(5)).build();
     private final AtomicBoolean running = new AtomicBoolean(true);
     private static final String GROUP = "crm_svc";
 
-    public CrmWorker(AppProperties props) {
+    public CrmWorker(AppProperties props, JedisPool pool) {
         this.props = props;
-        this.jedis = new Jedis(props.getRedis().getHost(), props.getRedis().getPort());
+        this.pool = pool;
     }
 
     @PostConstruct
@@ -43,36 +48,46 @@ public class CrmWorker {
     public void stop() { running.set(false); }
 
     public void run() {
-        ensureGroup();
-        XReadGroupParams params = XReadGroupParams.xReadGroupParams().block(5000).count(10);
-        Map<String, StreamEntryID> streams = Map.of(props.getStream().getName(), new StreamEntryID(">"));
+        try (Jedis jedis = pool.getResource()) {
+            ensureGroup(jedis);
+            XReadGroupParams params = XReadGroupParams.xReadGroupParams().block(5000).count(10);
+            Map<String, StreamEntryID> streams = Map.of(props.getStream().getName(), new StreamEntryID(">"));
 
-        System.out.println("CrmWorker started. Waiting for leads...");
-        while (running.get()) {
-            List<Map.Entry<String, List<StreamEntry>>> result =
-                jedis.xreadGroup(GROUP, "crm-worker-1", params, streams);
-            if (result == null) continue;
-            for (var streamEntry : result) {
-                for (StreamEntry entry : streamEntry.getValue()) {
-                    Map<String, String> data = entry.getFields();
-                    if (!"lead.created".equals(data.get("event"))) {
-                        jedis.xack(props.getStream().getName(), GROUP, entry.getID());
-                        continue;
-                    }
-                    try {
-                        addLeadToCrm(data);
-                        jedis.xack(props.getStream().getName(), GROUP, entry.getID());
-                        System.out.println("Lead added to CRM: " + data.get("id"));
-                    } catch (Exception e) {
-                        System.err.println("CRM push failed for " + data.get("id") + ": " + e.getMessage());
+            log.info("CrmWorker started. Waiting for leads...");
+            while (running.get()) {
+                List<Map.Entry<String, List<StreamEntry>>> result;
+                try {
+                    result = jedis.xreadGroup(GROUP, "crm-worker-1", params, streams);
+                } catch (Exception e) {
+                    log.error("CrmWorker xreadGroup failed; backing off", e);
+                    sleepQuiet(1000);
+                    continue;
+                }
+                if (result == null) continue;
+                for (var streamEntry : result) {
+                    for (StreamEntry entry : streamEntry.getValue()) {
+                        Map<String, String> data = entry.getFields();
+                        if (!"lead.created".equals(data.get("event"))) {
+                            jedis.xack(props.getStream().getName(), GROUP, entry.getID());
+                            continue;
+                        }
+                        try {
+                            addLeadToCrm(data);
+                            jedis.xack(props.getStream().getName(), GROUP, entry.getID());
+                            log.info("Lead added to CRM: {}", data.get("id"));
+                        } catch (Exception e) {
+                            log.error("CRM push failed for {}", data.get("id"), e);
+                        }
                     }
                 }
             }
+            log.info("CrmWorker stopped.");
+        } catch (Exception e) {
+            log.error("CrmWorker fatal — pool resource could not be acquired", e);
         }
-        System.out.println("CrmWorker stopped.");
     }
 
-    private void ensureGroup() {
+    private void ensureGroup(Jedis jedis) {
         try {
             jedis.xgroupCreate(props.getStream().getName(), GROUP, new StreamEntryID("0-0"), true);
         } catch (JedisDataException e) {
@@ -102,5 +117,9 @@ public class CrmWorker {
 
     private static String esc(String s) {
         return s == null ? "" : s.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private static void sleepQuiet(long ms) {
+        try { Thread.sleep(ms); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
     }
 }

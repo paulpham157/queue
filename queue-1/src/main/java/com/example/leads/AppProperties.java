@@ -26,10 +26,28 @@ public class AppProperties {
     public static class Redis {
         private String host = "localhost";
         private int port = 6379;
+        private Pool pool = new Pool();
         public String getHost() { return host; }
         public void setHost(String host) { this.host = host; }
         public int getPort() { return port; }
         public void setPort(int port) { this.port = port; }
+        public Pool getPool() { return pool; }
+        public void setPool(Pool pool) { this.pool = pool; }
+    }
+
+    public static class Pool {
+        private int maxTotal = 16;
+        private int maxIdle = 8;
+        private int minIdle = 2;
+        private int timeoutMs = 2000;
+        public int getMaxTotal() { return maxTotal; }
+        public void setMaxTotal(int maxTotal) { this.maxTotal = maxTotal; }
+        public int getMaxIdle() { return maxIdle; }
+        public void setMaxIdle(int maxIdle) { this.maxIdle = maxIdle; }
+        public int getMinIdle() { return minIdle; }
+        public void setMinIdle(int minIdle) { this.minIdle = minIdle; }
+        public int getTimeoutMs() { return timeoutMs; }
+        public void setTimeoutMs(int timeoutMs) { this.timeoutMs = timeoutMs; }
     }
 
     public static class Stream {
