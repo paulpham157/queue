@@ -1,3 +1,5 @@
+package com.example.leads;
+
 public class Lead {
     public String id;
     public String name;

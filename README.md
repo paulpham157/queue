@@ -1,12 +1,12 @@
-# Landing Page Lead Pipeline — Redis Streams + Java
+# Landing Page Lead Pipeline — Redis Streams + Spring Boot
 
 ## Kiến trúc
 
 ```
-   Landing form (HTML)
+   Landing form (HTML, served by Spring Boot)
          │ POST /leads
          ▼
-   LeadIngestApi (Java, port 8080)
+   LeadController
          │ xadd "leads" stream
          ▼
    ┌──────────────┐
@@ -17,13 +17,16 @@
    ┌──────┼──────────────────────────┐
    ▼      ▼                          ▼
 EmailWorker  CrmWorker          AnalyticsWorker
-(smtp:1025) (http :3000)       (postgres :5432)
-MailHog      json-server        Postgres
+(SMTP)       (HTTP POST)        (JDBC)
+   │             │                   │
+   ▼             ▼                   ▼
+MailHog      mock-crm            Postgres
+(SMTP mock)  (json-server)       (warehouse)
 ```
 
-3 worker chạy độc lập, mỗi worker có consumer group riêng. Một message được
-gửi cho cả 3 worker (fanout). Mỗi worker xử lý lỗi độc lập — CRM chết không
-ảnh hưởng email.
+3 worker chạy trong cùng Spring Boot process, mỗi worker có consumer group riêng.
+Một message được gửi cho cả 3 worker (fanout). Mỗi worker xử lý lỗi độc lập —
+CRM chết không ảnh hưởng email.
 
 ## Yêu cầu
 
@@ -33,46 +36,88 @@ gửi cho cả 3 worker (fanout). Mỗi worker xử lý lỗi độc lập — C
 
 ## Chạy
 
-### 1. Khởi động infrastructure
+### 1. Tạo .env từ template
 
 ```bash
-docker compose up -d
+cp .env.example .env
+```
+
+### 2. Khởi động infrastructure + app
+
+```bash
+docker compose up --build
 ```
 
 Services:
-- Redis: `localhost:6379`
-- MailHog SMTP: `localhost:1025`, Web UI: `http://localhost:8025`
-- Mock CRM (json-server): `http://localhost:3000/leads`
-- Postgres: `localhost:5432` (user/pass: `analytics/analytics`, db: `analytics`)
+- `lead-app` (Spring Boot): `http://localhost:8080`
+- `redis`: `localhost:6379`
+- `mailhog` SMTP: `localhost:1025`, Web UI: `http://localhost:8025`
+- `mock-crm` (json-server): `http://localhost:3000/leads`
+- `postgres`: `localhost:5432` (user/pass: `analytics/analytics`, db: `analytics`)
 
-### 2. Compile
-
-```bash
-mvn clean compile
-```
-
-### 3. Chạy 4 process (mỗi cái một terminal)
-
-```bash
-mvn exec:java -Dexec.mainClass="LeadIngestApi"
-mvn exec:java -Dexec.mainClass="EmailWorker"
-mvn exec:java -Dexec.mainClass="CrmWorker"
-mvn exec:java -Dexec.mainClass="AnalyticsWorker"
-```
-
-### 4. Test
+### 3. Test
 
 Mở `http://localhost:8080/` điền form → check:
 
-- Terminal EmailWorker: in "Email sent to ..."
+- App logs: "Lead queued", "Email sent", "Lead added to CRM", "Lead inserted"
 - `http://localhost:8025` (MailHog): thấy email welcome
 - `http://localhost:3000/leads` (json-server): thấy lead mới
-- Postgres: `psql -h localhost -U analytics -d analytics -c "SELECT * FROM leads;"`
+- Postgres: `docker exec -it postgres-analytics psql -U analytics -d analytics -c "SELECT * FROM leads;"`
+
+## Chạy ngoài Docker (dev nhanh)
+
+```bash
+docker compose up -d redis mailhog mock-crm postgres
+mvn spring-boot:run
+```
+
+Override env vars trỏ về `localhost`:
+```bash
+REDIS_HOST=localhost SMTP_HOST=localhost CRM_URL=http://localhost:3000/leads \
+DB_URL=jdbc:postgresql://localhost:5432/analytics mvn spring-boot:run
+```
+
+## Config
+
+`application.yml` đọc theo thứ tự ưu tiên:
+1. Environment variables (set qua Docker `env_file:` hoặc shell)
+2. Defaults trong file
+
+Pattern: `${VAR_NAME:default}`. Đổi host SMTP hay CRM token chỉ cần sửa `.env`,
+không đụng vào code.
+
+## Cấu trúc file
+
+```
+.
+├── docker-compose.yml          Redis, MailHog, json-server, Postgres, app
+├── Dockerfile                  multi-stage Maven build → JRE runtime
+├── pom.xml                     spring-boot-starter-parent 3.3.0
+├── db-init.sql                 schema Postgres
+├── crm-mock/                   json-server fixtures
+├── .env.example                template config
+└── src/main/
+    ├── java/com/example/leads/
+    │   ├── Application.java        @SpringBootApplication main
+    │   ├── AppProperties.java      @ConfigurationProperties("app")
+    │   ├── Lead.java
+    │   ├── LeadController.java     REST endpoint
+    │   ├── EmailWorker.java        @Component, group: email_svc
+    │   ├── CrmWorker.java          @Component, group: crm_svc
+    │   └── AnalyticsWorker.java    @Component, group: analytics_svc
+    └── resources/
+        ├── application.yml
+        └── landing.html
+```
 
 ## Production checklist
 
-- [ ] Retry policy khi gọi external fail (Resilience4j)
-- [ ] Dead-letter queue cho poison message (xgroup `dead_letters`)
+- [ ] Retry policy (Spring Retry hoặc Resilience4j)
+- [ ] Dead-letter queue cho poison message (`xpending` → group `dead_letters`)
 - [ ] Auth + rate limit cho `/leads`
-- [ ] TLS + connection pool cho SMTP/HTTP/Postgres
+- [ ] TLS + connection pool cho SMTP/HTTP/JDBC
 - [ ] Monitoring (lag, throughput) qua Micrometer + Prometheus
+- [ ] Schema migration (Flyway/Liquibase) thay SQL init
+- [ ] Scale horizontal — chạy mỗi worker thành Spring Boot app riêng,
+      multiple instances per consumer group
+- [ ] Graceful shutdown đã có sẵn (`@PreDestroy` set `running=false`)

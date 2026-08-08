@@ -1,0 +1,23 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+app:
+  redis:
+    host: ${REDIS_HOST:redis}
+    port: ${REDIS_PORT:6379}
+  stream:
+    name: ${STREAM_NAME:leads}
+  smtp:
+    host: ${SMTP_HOST:mailhog}
+    port: ${SMTP_PORT:1025}
+    from: ${SMTP_FROM:hello@acme.com}
+  crm:
+    url: ${CRM_URL:http://mock-crm:80/leads}
+  db:
+    url: ${DB_URL:jdbc:postgresql://postgres:5432/analytics}
+    user: ${DB_USER:analytics}
+    pass: ${DB_PASS:analytics}
+
+logging:
+  level:
+    com.example.leads: INFO
