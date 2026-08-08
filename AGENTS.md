@@ -40,5 +40,4 @@ to study — you do not need to read the others.
 
 ## Where to ask questions
 
-The repo has no forum / issue tracker configured. Read the code; the comments
-intentionally document only the non-obvious bits.
+Liên hệ trực tiếp tác giả. Bạn cũng có thể tìm đọc các bài viết khác của tác giả tại https://linktr.ee/paulpham157
