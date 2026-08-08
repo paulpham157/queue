@@ -1,0 +1,34 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: redis-streams
+    ports:
+      - "6379:6379"
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+  mock-crm:
+    image: clue/json-server:latest
+    container_name: mock-crm
+    ports:
+      - "3000:80"
+    volumes:
+      - ./crm-mock/db.json:/data/db.json:ro
+      - ./crm-mock/routes.json:/data/routes.json:ro
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres-analytics
+    environment:
+      POSTGRES_DB: analytics
+      POSTGRES_USER: analytics
+      POSTGRES_PASSWORD: analytics
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro

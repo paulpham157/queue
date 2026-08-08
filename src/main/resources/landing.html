@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Acme — Get a demo</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 480px; margin: 60px auto; padding: 0 20px; }
+  h1 { font-size: 28px; }
+  label { display: block; margin-top: 16px; font-weight: 600; }
+  input, textarea { width: 100%; padding: 8px; font-size: 14px; box-sizing: border-box; }
+  button { margin-top: 20px; padding: 10px 20px; background: #2563eb; color: white; border: 0; cursor: pointer; font-size: 14px; }
+  button:hover { background: #1d4ed8; }
+  #status { margin-top: 16px; padding: 10px; border-radius: 4px; display: none; }
+  #status.ok { background: #d1fae5; color: #065f46; display: block; }
+  #status.err { background: #fee2e2; color: #991b1b; display: block; }
+</style>
+</head>
+<body>
+<h1>Get a demo</h1>
+<form id="f">
+  <label>Name <input name="name" required></label>
+  <label>Email <input name="email" type="email" required></label>
+  <label>Company <input name="company"></label>
+  <label>Source <input name="source" placeholder="google / referral / etc"></label>
+  <label>Message <textarea name="message" rows="3"></textarea></label>
+  <button type="submit">Submit</button>
+</form>
+<div id="status"></div>
+<script>
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const data = new URLSearchParams(new FormData(e.target));
+  const status = document.getElementById('status');
+  status.className = '';
+  status.textContent = 'Submitting...';
+  status.style.display = 'block';
+  try {
+    const r = await fetch('/leads', { method: 'POST', body: data });
+    const j = await r.json();
+    if (r.ok) { status.className = 'ok'; status.textContent = 'Thanks! Lead ' + j.id + ' queued.'; e.target.reset(); }
+    else { status.className = 'err'; status.textContent = 'Error: ' + (j.error || 'unknown'); }
+  } catch (err) {
+    status.className = 'err'; status.textContent = 'Network error: ' + err.message;
+  }
+});
+</script>
+</body>
+</html>
