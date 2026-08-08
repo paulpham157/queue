@@ -1,123 +1,76 @@
-# Landing Page Lead Pipeline — Redis Streams + Spring Boot
+# Redis Streams Landing Page
 
-## Kiến trúc
+Spring Boot service that captures landing-page form submissions and fans them out
+to three independent consumers via Redis Streams.
+
+## Architecture
 
 ```
-   Landing form (HTML, served by Spring Boot)
-         │ POST /leads
-         ▼
-   LeadController
-         │ xadd "leads" stream
-         ▼
-   ┌──────────────┐
-   │ Redis Stream │
-   │   "leads"    │
-   └──────┬───────┘
-          │  fanout — 3 consumer groups, mỗi group đọc mọi message
-   ┌──────┼──────────────────────────┐
-   ▼      ▼                          ▼
-EmailWorker  CrmWorker          AnalyticsWorker
-(SMTP)       (HTTP POST)        (JDBC)
-   │             │                   │
-   ▼             ▼                   ▼
-MailHog      mock-crm            Postgres
-(SMTP mock)  (json-server)       (warehouse)
+Browser → LeadController ── xadd ──> Redis Stream "leads"
+                                       │
+                ┌──────────────────────┼──────────────────────┐
+                ▼                      ▼                      ▼
+        EmailWorker            CrmWorker            AnalyticsWorker
+        (SMTP)                 (HTTP POST)          (JDBC)
+        MailHog                json-server          Postgres
+        group: email_svc       group: crm_svc       group: analytics_svc
 ```
 
-3 worker chạy trong cùng Spring Boot process, mỗi worker có consumer group riêng.
-Một message được gửi cho cả 3 worker (fanout). Mỗi worker xử lý lỗi độc lập —
-CRM chết không ảnh hưởng email.
+Each consumer group reads every message independently — failure in one does not
+block the others.
 
-## Yêu cầu
-
-- Java 17+
-- Maven 3.9+
-- Docker + Docker Compose
-
-## Chạy
-
-### 1. Tạo .env từ template
+## Quick start
 
 ```bash
 cp .env.example .env
-```
-
-### 2. Khởi động infrastructure + app
-
-```bash
 docker compose up --build
+# open http://localhost:8080
 ```
 
-Services:
-- `lead-app` (Spring Boot): `http://localhost:8080`
-- `redis`: `localhost:6379`
-- `mailhog` SMTP: `localhost:1025`, Web UI: `http://localhost:8025`
-- `mock-crm` (json-server): `http://localhost:3000/leads`
-- `postgres`: `localhost:5432` (user/pass: `analytics/analytics`, db: `analytics`)
+Submit the form, then verify:
+- App logs (in `docker compose logs -f app`)
+- MailHog UI: http://localhost:8025
+- CRM mock: http://localhost:3000/leads
+- Postgres: `docker exec -it postgres-analytics psql -U analytics -d analytics -c "select * from leads;"`
 
-### 3. Test
-
-Mở `http://localhost:8080/` điền form → check:
-
-- App logs: "Lead queued", "Email sent", "Lead added to CRM", "Lead inserted"
-- `http://localhost:8025` (MailHog): thấy email welcome
-- `http://localhost:3000/leads` (json-server): thấy lead mới
-- Postgres: `docker exec -it postgres-analytics psql -U analytics -d analytics -c "SELECT * FROM leads;"`
-
-## Chạy ngoài Docker (dev nhanh)
+## Run locally without the app container
 
 ```bash
 docker compose up -d redis mailhog mock-crm postgres
-mvn spring-boot:run
+REDIS_HOST=localhost SMTP_HOST=localhost \
+  CRM_URL=http://localhost:3000/leads \
+  mvn spring-boot:run
 ```
 
-Override env vars trỏ về `localhost`:
-```bash
-REDIS_HOST=localhost SMTP_HOST=localhost CRM_URL=http://localhost:3000/leads \
-DB_URL=jdbc:postgresql://localhost:5432/analytics mvn spring-boot:run
-```
-
-## Config
-
-`application.yml` đọc theo thứ tự ưu tiên:
-1. Environment variables (set qua Docker `env_file:` hoặc shell)
-2. Defaults trong file
-
-Pattern: `${VAR_NAME:default}`. Đổi host SMTP hay CRM token chỉ cần sửa `.env`,
-không đụng vào code.
-
-## Cấu trúc file
+## Layout
 
 ```
-.
-├── docker-compose.yml          Redis, MailHog, json-server, Postgres, app
-├── Dockerfile                  multi-stage Maven build → JRE runtime
-├── pom.xml                     spring-boot-starter-parent 3.3.0
-├── db-init.sql                 schema Postgres
-├── crm-mock/                   json-server fixtures
-├── .env.example                template config
-└── src/main/
-    ├── java/com/example/leads/
-    │   ├── Application.java        @SpringBootApplication main
-    │   ├── AppProperties.java      @ConfigurationProperties("app")
-    │   ├── Lead.java
-    │   ├── LeadController.java     REST endpoint
-    │   ├── EmailWorker.java        @Component, group: email_svc
-    │   ├── CrmWorker.java          @Component, group: crm_svc
-    │   └── AnalyticsWorker.java    @Component, group: analytics_svc
-    └── resources/
-        ├── application.yml
-        └── landing.html
+src/main/java/com/example/leads/
+├── Application.java         Spring Boot entry point
+├── AppProperties.java       @ConfigurationProperties("app")
+├── LeadController.java      POST /leads → xadd
+├── Lead.java                POJO
+├── EmailWorker.java         @Component, group email_svc, SMTP
+├── CrmWorker.java           @Component, group crm_svc, HTTP
+└── AnalyticsWorker.java     @Component, group analytics_svc, JDBC
+src/main/resources/
+├── application.yml          config with ${ENV:default} overrides
+└── landing.html             form served at /
 ```
+
+## Configuration
+
+`application.yml` reads env vars first, falls back to defaults. `.env` is loaded
+via Docker Compose `env_file:`. See `.env.example` for production-ready examples
+(Resend, HubSpot, Redshift).
 
 ## Production checklist
 
-- [ ] Retry policy (Spring Retry hoặc Resilience4j)
-- [ ] Dead-letter queue cho poison message (`xpending` → group `dead_letters`)
-- [ ] Auth + rate limit cho `/leads`
-- [ ] TLS + connection pool cho SMTP/HTTP/JDBC
-- [ ] Monitoring (lag, throughput) qua Micrometer + Prometheus
-- [ ] Schema migration (Flyway/Liquibase) thay SQL init
-- [ ] Scale horizontal — chạy mỗi worker thành Spring Boot app riêng,
-      multiple instances per consumer group
-- [ ] Graceful shutdown đã có sẵn (`@PreDestroy` set `running=false`)
+- [ ] Retry policy (Spring Retry / Resilience4j)
+- [ ] Dead-letter queue (`xpending` → new group `dead_letters`)
+- [ ] Auth + rate limit on `/leads`
+- [ ] TLS + connection pooling for SMTP / HTTP / JDBC
+- [ ] Metrics: lag, throughput via Micrometer + Prometheus
+- [ ] Schema migrations (Flyway / Liquibase)
+- [ ] Scale horizontally: each worker as its own deployable, multiple replicas per group
+- [ ] Graceful shutdown (already wired via `@PreDestroy`)
