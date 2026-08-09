@@ -1,4 +1,4 @@
-import { Component, signal } from '@angular/core';
+import { Component, signal, ElementRef, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { BOT_REPLIES, BOT_DEFAULT } from './shared';
@@ -14,24 +14,9 @@ interface ChatMsg {
   standalone: true,
   imports: [CommonModule, FormsModule],
   template: `
-    <div class="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
-      <div class="px-6 py-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
-        <div class="flex items-center gap-3">
-          <div class="w-8 h-8 bg-accent/10 rounded-full flex items-center justify-center">
-            <svg class="w-4 h-4 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 8a4 4 0 100 8 4 4 0 000-8z"/>
-              <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2"/>
-            </svg>
-          </div>
-          <div>
-            <div class="font-medium text-sm">AI Agent demo</div>
-            <div class="text-xs text-gray-500">Hybrid agent · chat + action</div>
-          </div>
-        </div>
-        <span class="text-xs text-gray-400">Demo — pre-scripted</span>
-      </div>
-
-      <div class="h-[480px] overflow-y-auto p-6 space-y-4">
+    <div class="bg-white">
+      <!-- header removed — tab bar in the parent card provides the label -->
+      <div #chatContainer class="h-[400px] overflow-y-auto p-6 space-y-4 scroll-smooth">
         @for (m of messages(); track $index) {
           <div [class.text-right]="m.role === 'user'">
             <div [class]="m.role === 'user'
@@ -66,6 +51,8 @@ interface ChatMsg {
   `,
 })
 export class ChatbotDemoComponent {
+  @ViewChild('chatContainer') chatContainer!: ElementRef<HTMLDivElement>;
+
   messages = signal<ChatMsg[]>([
     { role: 'bot', text: 'Hi — I am a demo of the AI Agent. Ask me about pricing, integrations, or book a call.' },
   ]);
@@ -82,10 +69,19 @@ export class ChatbotDemoComponent {
     const text = (input || '').trim();
     if (!text) return;
     this.messages.update((m) => [...m, { role: 'user', text }]);
+    this.scrollToBottom();
     const found = BOT_REPLIES.find((r) => r.match.test(text));
     const reply = found ? found.reply : BOT_DEFAULT;
     setTimeout(() => {
       this.messages.update((m) => [...m, { role: 'bot', text: reply }]);
+      this.scrollToBottom();
     }, 400);
+  }
+
+  private scrollToBottom() {
+    requestAnimationFrame(() => {
+      const el = this.chatContainer?.nativeElement;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
   }
 }

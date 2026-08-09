@@ -1,6 +1,7 @@
 import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import confetti from 'canvas-confetti';
 import { SERVICES } from './shared';
 
 interface Lead {
@@ -41,6 +42,9 @@ interface Lead {
           class="w-full py-3 bg-accent hover:bg-accent-hover disabled:bg-gray-400 text-white font-medium rounded-md transition-colors">
           {{ submitting ? 'Sending…' : 'Send' }}
         </button>
+        <p class="text-center text-xs text-gray-500">
+          or <a href="https://cal.com/paulpham157/15min" class="text-accent hover:underline">book a 15-min call</a>
+        </p>
         @if (result) {
           <div [class.bg-green-100]="result.kind === 'ok'" [class.text-green-800]="result.kind === 'ok'"
                [class.bg-red-100]="result.kind === 'err'" [class.text-red-800]="result.kind === 'err'"
@@ -53,9 +57,9 @@ interface Lead {
 
     <div class="mt-4 bg-blue-50 border border-blue-100 rounded-xl p-5 text-sm text-gray-700">
       <p class="font-medium text-blue-900 mb-1">Pricing</p>
-      <p>Agent: from $2.5k + $500/mo</p>
-      <p>Workflow: from $1.5k/mo</p>
-      <p>Data: from $3k + $400/mo</p>
+      <p class="tabular">Agent: from $2.5k + $500/mo</p>
+      <p class="tabular">Workflow: from $1.5k/mo</p>
+      <p class="tabular">Data: from $3k + $400/mo</p>
     </div>
   `,
 })
@@ -80,6 +84,7 @@ export class LeadFormComponent {
       if (resp.ok) {
         this.result = { kind: 'ok', text: `Queued: ${body.id}. I will reply within one business day.` };
         this.lead = { name: '', email: '', company: '', service: '', message: '' };
+        this.celebrate();
       } else {
         this.result = { kind: 'err', text: `Error ${resp.status}: ${body.error ?? resp.statusText}` };
       }
@@ -89,5 +94,21 @@ export class LeadFormComponent {
     } finally {
       this.submitting = false;
     }
+  }
+
+  private celebrate() {
+    // Subtle, B2B-friendly burst from the form's submit-button position.
+    const node = document.querySelector('app-lead-form button[type="submit"]') as HTMLElement | null;
+    const rect = node?.getBoundingClientRect();
+    const x = rect ? (rect.left + rect.width / 2) / window.innerWidth : 0.5;
+    const y = rect ? (rect.top + rect.height / 2) / window.innerHeight : 0.6;
+    confetti({
+      particleCount: 80,
+      spread: 70,
+      origin: { x, y },
+      colors: ['#2563eb', '#8b5cf6', '#ec4899', '#10b981'],
+      disableForReducedMotion: true,
+      scalar: 0.9,
+    });
   }
 }
